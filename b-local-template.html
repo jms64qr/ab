@@ -1,0 +1,873 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Alpine Linux · 拖入 ISO 启动</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  background: #050a08;
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  font-family: -apple-system, "Segoe UI", monospace;
+  color: #cbf5e8;
+  overflow: hidden;
+}
+
+.term {
+  width: 1000px;
+  max-width: 94vw;
+  background: #0b1a15;
+  border-radius: 14px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6),
+              0 0 120px rgba(110, 207, 154, 0.08);
+  border: 1px solid #1d5e4b;
+  overflow: hidden;
+  position: relative;
+}
+
+.th {
+  background: #1a352c;
+  padding: 9px 16px;
+  display: flex;
+  gap: 12px;
+  border-bottom: 1px solid #0e463a;
+  align-items: center;
+}
+.dot { width: 12px; height: 12px; border-radius: 50%; background: #2c6e5c; }
+.dot.red { background: #c16a5a; }
+.dot.yel { background: #e2b063; }
+.dot.grn { background: #6ecf9a; }
+.ttl {
+  color: #c7efe2;
+  font-size: 0.75rem;
+  flex: 1;
+  text-align: center;
+  font-weight: bold;
+  letter-spacing: 1px;
+}
+.led {
+  width: 9px; height: 9px; border-radius: 50%;
+  background: #4be38a;
+  box-shadow: 0 0 5px #1fdd7a;
+  transition: all 0.3s;
+}
+.led.booting {
+  background: #e2b063;
+  box-shadow: 0 0 8px #e2b063;
+  animation: pulse 1s infinite;
+}
+.led.err { background: #c16a5a; box-shadow: 0 0 8px #c16a5a; }
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.scr {
+  background: #05120e;
+  min-height: 520px;
+  max-height: 70vh;
+  position: relative;
+  overflow: hidden;
+}
+
+/* ============ 待机界面 ============ */
+#dropzone {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 24px;
+  transition: all 0.3s ease;
+  z-index: 10;
+}
+#dropzone.dragover { background: rgba(110, 207, 154, 0.05); }
+#dropzone.hidden { opacity: 0; pointer-events: none; }
+
+.drive {
+  position: relative;
+  width: 260px;
+  height: 100px;
+  border-radius: 8px;
+  background: linear-gradient(180deg, #1a2e28 0%, #0f1f1a 100%);
+  border: 2px solid #2c6e5c;
+  box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.6),
+              0 8px 24px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+.tray {
+  position: absolute;
+  left: 50%; top: 50%;
+  transform: translate(-50%, -50%);
+  width: 220px; height: 60px;
+  border-radius: 4px;
+  background: #0a1814;
+  border: 1px solid #1d5e4b;
+  transition: transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.drive.open .tray { transform: translate(-50%, -50%) translateY(30px); }
+
+.disc {
+  position: absolute;
+  left: 50%; top: 50%;
+  width: 70px; height: 70px;
+  margin-left: -35px; margin-top: -35px;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 50% 50%, #0f1f1a 0%, #0f1f1a 20%, transparent 20%),
+    conic-gradient(from 0deg, #6ecf9a 0deg, #4be38a 60deg, #2c6e5c 120deg,
+                   #6ecf9a 180deg, #4be38a 240deg, #2c6e5c 300deg, #6ecf9a 360deg);
+  box-shadow: 0 0 12px rgba(110, 207, 154, 0.4),
+              inset 0 0 8px rgba(0, 0, 0, 0.6);
+  opacity: 0;
+  transform: scale(0.3) translateY(-200px) rotate(-180deg);
+  transition: all 0.8s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.disc.inserted { opacity: 1; transform: scale(1) translateY(0) rotate(0deg); }
+.disc.spinning { animation: disc-spin 1.2s linear infinite; }
+@keyframes disc-spin {
+  to { transform: scale(1) translateY(0) rotate(360deg); }
+}
+.disc::after {
+  content: "";
+  position: absolute;
+  left: 50%; top: 50%;
+  width: 16px; height: 16px;
+  margin: -8px 0 0 -8px;
+  border-radius: 50%;
+  background: #050a08;
+  box-shadow: inset 0 0 4px rgba(0, 0, 0, 0.9);
+}
+
+.prompt {
+  font-size: 15px;
+  color: #8fd6bd;
+  text-align: center;
+  line-height: 1.8;
+}
+.prompt .big {
+  font-size: 18px;
+  color: #c7efe2;
+  font-weight: bold;
+  display: block;
+  margin-bottom: 6px;
+}
+.prompt .hint {
+  font-size: 12px;
+  color: #519e86;
+  margin-top: 12px;
+  display: block;
+}
+.prompt .file-link {
+  color: #6ecf9a;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.prompt .file-link:hover { color: #4be38a; }
+.prompt .size-note {
+  font-size: 11px;
+  color: #3d7a64;
+  margin-top: 16px;
+  display: block;
+  max-width: 400px;
+}
+
+/* ============ 加载进度 ============ */
+#loading {
+  position: absolute;
+  inset: 0;
+  display: none;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 20px;
+  z-index: 9;
+  background: #05120e;
+}
+#loading.active { display: flex; }
+
+.loading-disc {
+  width: 80px; height: 80px;
+  border-radius: 50%;
+  background: conic-gradient(from 0deg, #6ecf9a 0deg, #4be38a 60deg,
+                             #2c6e5c 120deg, #6ecf9a 180deg,
+                             #4be38a 240deg, #2c6e5c 300deg, #6ecf9a 360deg);
+  box-shadow: 0 0 20px rgba(110, 207, 154, 0.5);
+  animation: disc-spin 1.2s linear infinite;
+  position: relative;
+}
+.loading-disc::after {
+  content: "";
+  position: absolute;
+  left: 50%; top: 50%;
+  width: 20px; height: 20px;
+  margin: -10px 0 0 -10px;
+  border-radius: 50%;
+  background: #05120e;
+}
+.loading-text { color: #8fd6bd; font-size: 14px; }
+
+.progress-bar {
+  width: 320px; height: 4px;
+  background: #0f2a23;
+  border-radius: 2px;
+  overflow: hidden;
+}
+.progress-fill {
+  height: 100%; width: 0%;
+  background: linear-gradient(90deg, #2c6e5c, #6ecf9a, #4be38a);
+  border-radius: 2px;
+  transition: width 0.15s ease-out;
+  box-shadow: 0 0 8px rgba(110, 207, 154, 0.6);
+}
+
+/* ============ HTML 终端 ============ */
+#term {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: none;
+  background: #05120e;
+  color: #cbf5e8;
+  padding: 12px 16px;
+  font-family: Consolas, Monaco, "Courier New", monospace;
+  font-size: 14px;
+  line-height: 1.25;
+  white-space: pre;
+  overflow-y: auto;
+  overflow-x: hidden;
+  user-select: text;
+  cursor: text;
+  outline: none;
+}
+
+#term.active { display: block; }
+
+#term::-webkit-scrollbar { width: 10px; }
+#term::-webkit-scrollbar-track { background: #06231c; }
+#term::-webkit-scrollbar-thumb {
+  background: #2f8a70;
+  border-radius: 5px;
+}
+#term::-webkit-scrollbar-thumb:hover { background: #4be38a; }
+
+/* ANSI 16 色（绿字主题） */
+#term .fg-0  { color: #05120e; }
+#term .fg-1  { color: #c16a5a; }
+#term .fg-2  { color: #6ecf9a; }
+#term .fg-3  { color: #e2b063; }
+#term .fg-4  { color: #5a9ec1; }
+#term .fg-5  { color: #b063c1; }
+#term .fg-6  { color: #63c1b0; }
+#term .fg-7  { color: #cbf5e8; }
+#term .fg-8  { color: #2c6e5c; }
+#term .fg-9  { color: #ff8a7a; }
+#term .fg-10 { color: #4be38a; }
+#term .fg-11 { color: #ffd080; }
+#term .fg-12 { color: #7ab8e0; }
+#term .fg-13 { color: #d080e0; }
+#term .fg-14 { color: #80e0d0; }
+#term .fg-15 { color: #eafff2; }
+
+#term .bg-0  { background-color: #05120e; }
+#term .bg-1  { background-color: #c16a5a; }
+#term .bg-2  { background-color: #6ecf9a; }
+#term .bg-3  { background-color: #e2b063; }
+#term .bg-4  { background-color: #5a9ec1; }
+#term .bg-5  { background-color: #b063c1; }
+#term .bg-6  { background-color: #63c1b0; }
+#term .bg-7  { background-color: #cbf5e8; }
+#term .bg-8  { background-color: #2c6e5c; }
+#term .bg-9  { background-color: #ff8a7a; }
+#term .bg-10 { background-color: #4be38a; }
+#term .bg-11 { background-color: #ffd080; }
+#term .bg-12 { background-color: #7ab8e0; }
+#term .bg-13 { background-color: #d080e0; }
+#term .bg-14 { background-color: #80e0d0; }
+#term .bg-15 { background-color: #eafff2; }
+
+#term .bold { font-weight: bold; }
+#term .cursor {
+  background: #62ffb5;
+  color: #05120e !important;
+  animation: cursor-blink 1s step-end infinite;
+}
+@keyframes cursor-blink {
+  50% { opacity: 0; }
+}
+
+/* 换盘按钮 */
+#eject {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 20;
+  background: rgba(29, 89, 72, 0.85);
+  border: 1px solid #2c6e5c;
+  color: #def5eb;
+  font-family: monospace;
+  padding: 4px 12px;
+  border-radius: 25px;
+  cursor: pointer;
+  font-size: 11px;
+  display: none;
+  backdrop-filter: blur(4px);
+}
+#eject.show { display: block; }
+#eject:hover { background: rgba(49, 122, 102, 0.9); }
+
+.ftr {
+  background: #09231d;
+  padding: 6px 16px;
+  font-size: 10px;
+  color: #519e86;
+  display: flex;
+  justify-content: space-between;
+  border-top: 1px solid #175e4b;
+  align-items: center;
+  gap: 10px;
+}
+</style>
+</head>
+<body>
+<div class="term">
+  <div class="th">
+    <div class="dot red"></div>
+    <div class="dot yel"></div>
+    <div class="dot grn"></div>
+    <div class="ttl">alpine:~# REAL LINUX (v86/WASM)</div>
+    <div class="led" id="led"></div>
+  </div>
+
+  <div class="scr">
+    <div id="dropzone">
+      <div class="drive" id="drive">
+        <div class="tray"></div>
+        <div class="disc" id="disc"></div>
+      </div>
+      <div class="prompt" id="prompt">
+        <span class="big">把 Alpine ISO 拖到这里</span>
+        就像插入一张光盘
+        <span class="hint">
+          <span class="file-link" id="pickFile">或者点击这里选择文件</span>
+        </span>
+        <span class="size-note">
+          需要 Alpine Linux 3.24.2 x86 (32位) ISO，约 49 MB<br>
+          双击本页面即可运行，无需服务器、无需联网
+        </span>
+      </div>
+    </div>
+
+    <div id="loading">
+      <div class="loading-disc"></div>
+      <div class="loading-text" id="loadingText">Reading disc...</div>
+      <div class="progress-bar">
+        <div class="progress-fill" id="progressFill"></div>
+      </div>
+    </div>
+
+    <div id="term" tabindex="0"></div>
+
+    <button id="eject">⏏ 换盘</button>
+  </div>
+
+  <div class="ftr">
+    <span id="status">状态：等待 ISO 光盘…</span>
+    <span>v86 · Alpine 3.24.2 · i686</span>
+  </div>
+</div>
+
+<input type="file" id="fileInput" accept=".iso" style="display:none;">
+
+<script>
+window.__WASM_B64__ = "___WASM_BASE64___";
+window.__SEABIOS_B64__ = "___SEABIOS_BASE64___";
+window.__VGABIOS_B64__ = "___VGABIOS_BASE64___";
+</script>
+
+<script>___LIBV86_INLINE___</script>
+
+<script>
+(function () {
+  "use strict";
+
+  // ================= DOM 引用 =================
+  const dropzone = document.getElementById("dropzone");
+  const drive = document.getElementById("drive");
+  const disc = document.getElementById("disc");
+  const promptEl = document.getElementById("prompt");
+  const loading = document.getElementById("loading");
+  const loadingText = document.getElementById("loadingText");
+  const progressFill = document.getElementById("progressFill");
+  const termEl = document.getElementById("term");
+  const ejectBtn = document.getElementById("eject");
+  const fileInput = document.getElementById("fileInput");
+  const led = document.getElementById("led");
+  const statusEl = document.getElementById("status");
+
+  // ================= 状态 =================
+  let emulator = null;
+  const ROWS = 32;
+  const COLS = 110;
+
+  // 屏幕缓冲：每格 { ch, fg, bg, bold }
+  let screenBuf = [];
+  let cursor = { row: 0, col: 0 };
+  let curFg = null, curBg = null, curBold = false;
+  let ansiState = "normal"; // normal | esc | csi | osc
+  let csiParams = "";
+  let oscBuffer = "";
+  let renderPending = false;
+
+  function resetScreen() {
+    screenBuf = Array.from({ length: ROWS }, () =>
+      Array.from({ length: COLS }, () => ({ ch: " ", fg: null, bg: null, bold: false }))
+    );
+    cursor = { row: 0, col: 0 };
+    curFg = null; curBg = null; curBold = false;
+    ansiState = "normal";
+    csiParams = "";
+    oscBuffer = "";
+  }
+
+  function blankCell() {
+    return { ch: " ", fg: null, bg: null, bold: false };
+  }
+
+  function scrollUp() {
+    screenBuf.shift();
+    screenBuf.push(Array.from({ length: COLS }, blankCell));
+    cursor.row = ROWS - 1;
+  }
+
+  function putChar(ch) {
+    if (cursor.col >= COLS) {
+      cursor.col = 0;
+      cursor.row++;
+      if (cursor.row >= ROWS) scrollUp();
+    }
+    screenBuf[cursor.row][cursor.col] = {
+      ch: ch,
+      fg: curFg,
+      bg: curBg,
+      bold: curBold,
+    };
+    cursor.col++;
+  }
+
+  // ================= ANSI 解析 =================
+  function feedByte(byte) {
+    // OSC: ESC ] ... BEL
+    if (ansiState === "osc") {
+      if (byte === 0x07) { ansiState = "normal"; oscBuffer = ""; }
+      else oscBuffer += String.fromCharCode(byte);
+      return;
+    }
+
+    if (ansiState === "normal") {
+      if (byte === 0x1b) {
+        ansiState = "esc";
+      } else if (byte === 0x0a) { // \n
+        cursor.row++;
+        if (cursor.row >= ROWS) scrollUp();
+      } else if (byte === 0x0d) { // \r
+        cursor.col = 0;
+      } else if (byte === 0x08) { // \b
+        if (cursor.col > 0) cursor.col--;
+      } else if (byte === 0x09) { // \t
+        cursor.col = (Math.floor(cursor.col / 8) + 1) * 8;
+        if (cursor.col >= COLS) cursor.col = COLS - 1;
+      } else if (byte === 0x07) {
+        // BEL, 忽略
+      } else if (byte >= 0x20) {
+        putChar(String.fromCharCode(byte));
+      }
+      return;
+    }
+
+    if (ansiState === "esc") {
+      if (byte === 0x5b) { // '['
+        ansiState = "csi";
+        csiParams = "";
+      } else if (byte === 0x5d) { // ']'
+        ansiState = "osc";
+        oscBuffer = "";
+      } else {
+        ansiState = "normal";
+      }
+      return;
+    }
+
+    if (ansiState === "csi") {
+      // CSI 参数: 0x30-0x3f，中间 0x20-0x2f，结束 0x40-0x7e
+      if (byte >= 0x40 && byte <= 0x7e) {
+        handleCSI(csiParams, String.fromCharCode(byte));
+        ansiState = "normal";
+        csiParams = "";
+      } else {
+        csiParams += String.fromCharCode(byte);
+      }
+    }
+  }
+
+  function handleCSI(params, final) {
+    const nums = params.split(";").map(s => parseInt(s, 10));
+    const n0 = isNaN(nums[0]) ? 0 : nums[0];
+
+    switch (final) {
+      case "m": // SGR 颜色/样式
+        if (nums.length === 0 || isNaN(nums[0])) nums.push(0);
+        for (let i = 0; i < nums.length; i++) {
+          const n = isNaN(nums[i]) ? 0 : nums[i];
+          if (n === 0) { curFg = null; curBg = null; curBold = false; }
+          else if (n === 1) curBold = true;
+          else if (n === 22) curBold = false;
+          else if (n >= 30 && n <= 37) curFg = n - 30;
+          else if (n >= 40 && n <= 47) curBg = n - 40;
+          else if (n >= 90 && n <= 97) curFg = n - 90 + 8;
+          else if (n >= 100 && n <= 107) curBg = n - 100 + 8;
+          else if (n === 39) curFg = null;
+          else if (n === 49) curBg = null;
+          // 38;5;n / 48;5;n 256 色，简单取模到 16 色
+          else if (n === 38 || n === 48) {
+            const isFg = (n === 38);
+            if (nums[i + 1] === 5) {
+              const idx = nums[i + 2] || 0;
+              if (isFg) curFg = idx % 16;
+              else curBg = idx % 16;
+              i += 2;
+            } else if (nums[i + 1] === 2) {
+              // 真彩色，取近似到 16 色
+              const r = nums[i + 2] || 0;
+              const g = nums[i + 3] || 0;
+              const b = nums[i + 4] || 0;
+              const idx = ((r > 128 ? 1 : 0) | (g > 128 ? 2 : 0) | (b > 128 ? 4 : 0));
+              if (isFg) curFg = idx;
+              else curBg = idx;
+              i += 4;
+            }
+          }
+        }
+        break;
+
+      case "J": // 清屏
+        if (n0 === 2 || n0 === 3) {
+          screenBuf = Array.from({ length: ROWS }, () =>
+            Array.from({ length: COLS }, blankCell)
+          );
+          cursor = { row: 0, col: 0 };
+        } else if (n0 === 0) {
+          // 从光标到末尾清空
+          for (let c = cursor.col; c < COLS; c++) screenBuf[cursor.row][c] = blankCell();
+          for (let r = cursor.row + 1; r < ROWS; r++)
+            for (let c = 0; c < COLS; c++) screenBuf[r][c] = blankCell();
+        }
+        break;
+
+      case "K": // 清行
+        if (n0 === 0) {
+          for (let c = cursor.col; c < COLS; c++) screenBuf[cursor.row][c] = blankCell();
+        } else if (n0 === 2) {
+          for (let c = 0; c < COLS; c++) screenBuf[cursor.row][c] = blankCell();
+        }
+        break;
+
+      case "H": // 定位（行;列）
+        cursor.row = Math.max(0, Math.min(ROWS - 1, (nums[0] || 1) - 1));
+        cursor.col = Math.max(0, Math.min(COLS - 1, (nums[1] || 1) - 1));
+        break;
+
+      case "A": // 光标上移
+        cursor.row = Math.max(0, cursor.row - (n0 || 1));
+        break;
+      case "B": // 光标下移
+        cursor.row = Math.min(ROWS - 1, cursor.row + (n0 || 1));
+        break;
+      case "C": // 光标右移
+        cursor.col = Math.min(COLS - 1, cursor.col + (n0 || 1));
+        break;
+      case "D": // 光标左移
+        cursor.col = Math.max(0, cursor.col - (n0 || 1));
+        break;
+
+      // 私有模式 h/l、光标保存 s/u 等，忽略
+      default:
+        break;
+    }
+  }
+
+  // ================= HTML 渲染 =================
+  function render() {
+    if (!termEl) return;
+    const parts = [];
+
+    for (let r = 0; r < ROWS; r++) {
+      let lastFg = null, lastBg = null, lastBold = false;
+      let spanOpen = false;
+
+      for (let c = 0; c < COLS; c++) {
+        const cell = screenBuf[r][c];
+        const isCursor = (r === cursor.row && c === cursor.col);
+
+        const fg = cell.fg;
+        const bg = cell.bg;
+        const bold = cell.bold;
+
+        if (fg !== lastFg || bg !== lastBg || bold !== lastBold || isCursor) {
+          if (spanOpen) { parts.push("</span>"); spanOpen = false; }
+
+          const cls = [];
+          if (fg !== null) cls.push("fg-" + fg);
+          if (bg !== null) cls.push("bg-" + bg);
+          if (bold) cls.push("bold");
+          if (isCursor) cls.push("cursor");
+
+          parts.push(`<span class="${cls.join(" ")}">`);
+          spanOpen = true;
+
+          lastFg = fg; lastBg = bg; lastBold = bold;
+        }
+
+        const ch = cell.ch;
+        if (ch === "<") parts.push("&lt;");
+        else if (ch === ">") parts.push("&gt;");
+        else if (ch === "&") parts.push("&amp;");
+        else parts.push(ch);
+      }
+
+      if (spanOpen) parts.push("</span>");
+      if (r < ROWS - 1) parts.push("\n");
+    }
+
+    termEl.innerHTML = parts.join("");
+
+    // 自动滚到底部（除非用户主动往上翻了）
+    const isAtBottom =
+      termEl.scrollHeight - termEl.scrollTop - termEl.clientHeight < 40;
+    if (isAtBottom) {
+      termEl.scrollTop = termEl.scrollHeight;
+    }
+  }
+
+  function scheduleRender() {
+    if (renderPending) return;
+    renderPending = true;
+    setTimeout(() => {
+      renderPending = false;
+      render();
+    }, 40);
+  }
+
+  // ================= 工具 =================
+  function setStatus(t, cls) {
+    statusEl.textContent = "状态：" + t;
+    led.className = "led";
+    if (cls) led.classList.add(cls);
+  }
+
+  function b64ToUint8(b64) {
+    const bin = atob(b64);
+    const len = bin.length;
+    const arr = new Uint8Array(len);
+    for (let i = 0; i < len; i++) arr[i] = bin.charCodeAt(i);
+    return arr;
+  }
+
+  function playClick() {
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "square";
+      osc.frequency.setValueAtTime(220, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(80, ctx.currentTime + 0.08);
+      gain.gain.setValueAtTime(0.15, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.1);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.1);
+    } catch (e) {}
+  }
+
+  // ================= 拖拽 =================
+  ["dragenter", "dragover"].forEach(ev => {
+    window.addEventListener(ev, e => {
+      e.preventDefault();
+      dropzone.classList.add("dragover");
+    });
+  });
+  ["dragleave", "drop"].forEach(ev => {
+    window.addEventListener(ev, e => {
+      e.preventDefault();
+      dropzone.classList.remove("dragover");
+    });
+  });
+  window.addEventListener("drop", e => {
+    const file = e.dataTransfer.files[0];
+    if (file) handleFile(file);
+  });
+
+  document.getElementById("pickFile").addEventListener("click", () => fileInput.click());
+  fileInput.addEventListener("change", () => {
+    const file = fileInput.files[0];
+    if (file) handleFile(file);
+  });
+
+  // ================= 换盘 =================
+  ejectBtn.addEventListener("click", () => {
+    if (emulator) {
+      try { emulator.destroy(); } catch (e) {}
+      emulator = null;
+    }
+    termEl.innerHTML = "";
+    termEl.classList.remove("active");
+    ejectBtn.classList.remove("show");
+    dropzone.classList.remove("hidden");
+    disc.classList.remove("inserted", "spinning");
+    drive.classList.remove("open");
+    promptEl.style.opacity = "1";
+    resetScreen();
+    setStatus("等待 ISO 光盘…");
+    fileInput.value = "";
+  });
+
+  // ================= 处理文件 =================
+  function handleFile(file) {
+    if (!file.name.toLowerCase().endsWith(".iso")) {
+      alert("请拖入 .iso 文件");
+      return;
+    }
+    if (file.size < 20 * 1024 * 1024) {
+      alert("ISO 文件太小，可能不是完整的 Linux 发行版镜像");
+      return;
+    }
+
+    playClick();
+    dropzone.classList.add("hidden");
+    drive.classList.add("open");
+
+    setTimeout(() => { disc.classList.add("inserted"); }, 100);
+    setTimeout(() => {
+      drive.classList.remove("open");
+      playClick();
+      disc.classList.add("spinning");
+    }, 700);
+    setTimeout(() => {
+      loading.classList.add("active");
+      setStatus("正在读取光盘…", "booting");
+      fakeProgress();
+    }, 1500);
+    setTimeout(() => { startV86(file); }, 2000);
+  }
+
+  function fakeProgress() {
+    let p = 0;
+    const tick = () => {
+      p += Math.random() * 15 + 5;
+      if (p > 95) p = 95;
+      progressFill.style.width = p + "%";
+      loadingText.textContent = "Reading disc... " + Math.round(p) + "%";
+      if (p < 95) setTimeout(tick, 100);
+    };
+    tick();
+  }
+
+  // ================= 启动 v86 =================
+  function startV86(file) {
+    const wasmBuf = b64ToUint8(window.__WASM_B64__).buffer;
+    const seabiosBuf = b64ToUint8(window.__SEABIOS_B64__).buffer;
+    const vgabiosBuf = b64ToUint8(window.__VGABIOS_B64__).buffer;
+
+    resetScreen();
+
+    try {
+      emulator = new V86({
+        wasm_path: "",
+        wasm_fn: function (imports) {
+          return WebAssembly.instantiate(wasmBuf, imports)
+            .then(r => r.instance.exports);
+        },
+        memory_size: 128 * 1024 * 1024,
+        vga_memory_size: 2 * 1024 * 1024,
+        // 不用 v86 内置的任何容器
+        serial_container: null,
+        screen_container: null,
+        bios: { buffer: seabiosBuf },
+        vga_bios: { buffer: vgabiosBuf },
+        cdrom: { buffer: file, async: false },
+        boot_order: 0x123,
+        autostart: true,
+        disable_speaker: true,
+        disable_keyboard: false,
+        disable_mouse: true,
+      });
+
+      // 拦截串口输出
+      emulator.add_listener("serial0-output-byte", (byte) => {
+        feedByte(byte);
+        scheduleRender();
+      });
+
+      emulator.add_listener("emulator-ready", () => {
+        setStatus("内核启动中…", "booting");
+        loadingText.textContent = "Starting Linux kernel...";
+        progressFill.style.width = "100%";
+        setTimeout(() => {
+          loading.classList.remove("active");
+          termEl.classList.add("active");
+          ejectBtn.classList.add("show");
+          setStatus("已启动：Alpine Linux 正在运行 ✅");
+          termEl.focus();
+        }, 800);
+      });
+
+      emulator.add_listener("download-error", () => {
+        setStatus("加载失败", "err");
+      });
+
+      // 键盘输入
+      termEl.addEventListener("mousedown", () => {
+        termEl.focus();
+      });
+
+      termEl.addEventListener("keydown", (e) => {
+        e.preventDefault();
+
+        if (e.key === "Enter") emulator.serial0_send("\r");
+        else if (e.key === "Backspace") emulator.serial0_send("\x7f");
+        else if (e.key === "Tab") emulator.serial0_send("\t");
+        else if (e.key === "Escape") emulator.serial0_send("\x1b");
+        else if (e.key === "ArrowUp") emulator.serial0_send("\x1b[A");
+        else if (e.key === "ArrowDown") emulator.serial0_send("\x1b[B");
+        else if (e.key === "ArrowRight") emulator.serial0_send("\x1b[C");
+        else if (e.key === "ArrowLeft") emulator.serial0_send("\x1b[D");
+        else if (e.key === "Home") emulator.serial0_send("\x1b[H");
+        else if (e.key === "End") emulator.serial0_send("\x1b[F");
+        else if (e.key === "Delete") emulator.serial0_send("\x1b[3~");
+        else if (e.ctrlKey && e.key.length === 1) {
+          const code = e.key.toLowerCase().charCodeAt(0) - 96;
+          if (code >= 1 && code <= 26) emulator.serial0_send(String.fromCharCode(code));
+        } else if (e.key.length === 1) {
+          emulator.serial0_send(e.key);
+        }
+      });
+    } catch (e) {
+      console.error(e);
+      alert("v86 启动失败：" + e.message);
+    }
+  }
+
+  // ================= 初始化 =================
+  resetScreen();
+  setStatus("等待 ISO 光盘…");
+})();
+</script>
+</body>
+</html>
